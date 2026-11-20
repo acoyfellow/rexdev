@@ -3,7 +3,7 @@ def pad($n): tostring | . + (" " * $n) | .[0:$n];
 def hms: (. / 1000 | floor | localtime | strftime("%H:%M:%S"));
 def words: map(if type == "string" then . else tojson end) | join(" ");
 
-fromjson? | select(type == "object") | . as $e
+select(type == "object") | . as $e
 | ($e.event // {}) as $ev
 | ($ev.request // null) as $req
 | ($ev.response.status // null) as $st
@@ -21,7 +21,8 @@ fromjson? | select(type == "object") | . as $e
         + "  " + paint($tone; (if $st != null then ($st | tostring) else ($e.outcome // "?") end))
         + (if $ms != null then paint("2"; "  \($ms)ms") else "" end)
       else
-        paint("1"; (if $ev.cron != null then "cron   " + ($ev.cron | tostring)
+        paint("1"; (if $e.durableObjectId != null then "do     " + ($e.entrypoint // $e.scriptName // "")
+                    elif $ev.cron != null then "cron   " + ($ev.cron | tostring)
                     elif $ev.queue != null then "queue  " + ($ev.queue | tostring)
                     elif $ev.mailFrom != null then "email  " + ($ev.mailFrom | tostring)
                     else ($e.scriptName // "event") end))

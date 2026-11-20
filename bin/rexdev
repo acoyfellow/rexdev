@@ -132,8 +132,9 @@ Examples:
 Flags:
       --config FILE   use this wrangler config file
       --env ENV       tail the Worker of this environment
-      --status S      show only ok, error, or canceled requests
-      --search TEXT   show only events with TEXT in their logs
+      --status S      show only events with this outcome: ok, error, or canceled
+                      (a 404 response has outcome ok; "error" means the Worker threw)
+      --search TEXT   show only events with TEXT in a console.log line
 EOF
     ;;
     deploy) cat <<'EOF'
@@ -320,7 +321,7 @@ wait_ready() {
 
 is_deployed() {
   local out
-  out="$("$(wrangler_bin)" deployments list --name "$worker" "${cfgargs[@]}" 2>/dev/null)" || return 1
+  out="$(cd "$proj" && "$(wrangler_bin)" deployments list --name "$worker" "${cfgargs[@]}" 2>/dev/null)" || return 1
   grep -q 'Created:' <<<"$out"
 }
 
@@ -542,7 +543,7 @@ case "$cmd" in
     [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && color=1
     cd "$proj"
     note "Tailing $worker. Press Ctrl-C to stop."
-    "$wr" "${targs[@]}" | jq -R --unbuffered -r --argjson color "$color" -f "$root_repo/lib/format.jq"
+    "$wr" "${targs[@]}" | jq --unbuffered -r --argjson color "$color" -f "$root_repo/lib/format.jq"
     ;;
 
   deploy)

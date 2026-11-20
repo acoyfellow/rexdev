@@ -1,6 +1,6 @@
 # rexdev status
 
-Updated 2026-11-20. Repo: `~/cloudflare/rexdev` (local commits only, nothing pushed). Scratch Worker: `~/cloudflare/rexdev-test` (routes `/`, `/log`, `/throw`; has a `staging` env).
+Updated 2026-11-20, after the orchestrator's answers. Repo: `~/cloudflare/rexdev` (local commits only, nothing pushed). Scratch Worker: `~/cloudflare/rexdev-test` (routes `/`, `/log`, `/throw`; has a `staging` env).
 
 ## Done
 
@@ -16,6 +16,13 @@ All from `~/cloudflare/rexdev-test`, inside this Rex pane, against the real `wra
 | `rexdev up --json` | Dev pane opened. Browser pane opened at `http://localhost:8787` after the ready line. Log pane skipped with a note, since the Worker is not deployed. `curl localhost:8787/log` answered `logged`. |
 | `rexdev up` again | `"reused":true`. No new panes. |
 | `rexdev up --no-tail --json` in a `wrangler.toml` project (`/tmp/rd-toml`) | Worker `rexdev-toml` read from the toml. Dev server answered. `rexdev down` closed both panes. |
+| `rexdev logs` from `~/cloudflare/rexbox/cloud`, with real traffic from `cloudflared access curl …/_rexbox/boxes` and `…/_rexbox/nope` | Two lines of output per request: `GET /_rexbox/boxes 200 50ms`, `GET /_rexbox/nope 404 1ms`, plus a Durable Object line (`do Index ok 11ms`). Colors checked on the same real events: 200 green, 404 yellow. |
+| Duration field | Real events carry `wallTime` and `cpuTime`. The formatter uses `wallTime`. Confirmed (400ms wall, 4ms CPU on the first request). |
+| Request headers | Real events include headers (an auth header among them). The formatter prints none: grep of its output for `token` and `cf-access` finds 0 matches. |
+| `rexdev logs --status error` | Shows nothing for these traffic events. Both have outcome `ok`, and wrangler filters on outcome, not HTTP status, so a 404 is not an error. I could not make this Worker throw, so a positive match is untested. Help text now says so. |
+| `rexdev logs --search nope` and `--search zzzznomatch` | Both show nothing. rexbox writes no `console.log` lines, so `--search` has nothing to match. A positive match is untested. |
+| Deployed-Worker check, by itself (`wrangler deployments list --name rexbox`) | 20 `Created:` lines, so `is_deployed` is true. For `rexdev-test` the command fails with code 10007, so it is false. I did not run `up` against the rexbox config, since it has no way to skip `wrangler dev`. |
+| `rexdev up` in a plain `wrangler.json` project (`/tmp/rd-json`, with a trailing comma) | Worker `rexdev-json` read. Dev server answered. `down` closed the pane. |
 | `rexdev up --env staging --tail --json` | Worker name `rexdev-test-staging`. Log pane opened. It shows wrangler's "This Worker does not exist" error and stays open (`--keep-open`). |
 | `rexdev status` / `--json` | Project, config, worker, wrangler version and path, dev pane and URL, preview pane, log pane. |
 | `rexdev open /log`, `rexdev open /throw` | Existing preview pane navigated. `rexweb info` showed `http://localhost:8787/throw`. |
@@ -42,15 +49,18 @@ I closed every pane I opened and removed `~/.rexdev` after testing.
 - BSD `script` flushes its log every 30 seconds. `up` took 31 seconds to see the ready line. Fixed with `script -q -t 0`. Now `up` takes about 1 second.
 - Killing `script` left the pane's terminal raw (staircase output after `restart`). The wrapper now restores `stty`.
 - `rex split --shell=none` panes have no nvm PATH, so Rex actions could not find `wrangler`. Every normal `rexdev` run saves its PATH to `~/.rexdev/path`, and the helper pane uses it.
+- `wrangler tail --format json` prints each event as indented, multi-line JSON. The first formatter read one line at a time and would have shown nothing. It now reads the JSON stream. wrangler writes its errors to stderr, so they cannot break it.
+- `is_deployed` now runs wrangler from the project folder.
+- Durable Object events showed the Worker name. They now show `do  ClassName`.
 
-## Could not verify
+## Not verified
 
-1. **`rexdev logs` against a real deployed Worker.** Question for the orchestrator: which deployed Worker may I tail? It must have no secrets in its logs. I did not deploy anything. So far I checked only the error path (`Worker does not exist`, exit 1), and the formatter on one hand-written tail event, which is not a real test. Until then, the duration field is a guess: it uses `wallTime`, then `cpuTime`. The `--status` and `--search` flags are passed straight to `wrangler tail`.
-2. **`docs/hero.png` is missing.** The README points to it. It needs a real screenshot of the three-pane layout.
-3. **The log pane auto-open on a deployed Worker.** `is_deployed` looks for `Created:` in `wrangler deployments list`. I only saw the not-deployed case.
-4. **The `Shift-Cmd-D` key press.** I ran the action with `rex do`, not with the key.
-5. **A browser pane that takes clicks.** rexweb warned `Rex isn't showing pane …` because my Rex window may be off screen. Navigation worked, but I did not click or type in the preview.
-6. **A `wrangler.json` project.** I ran jsonc and toml, not plain json. It uses the same parser as jsonc.
-7. **`--remote` and project-local `node_modules/.bin/wrangler`.** The scratch Worker has no local wrangler.
+1. A positive match for `--status error` (needs a Worker that throws, and a deployed one) and for `--search` (needs a Worker that logs). Both flags go straight to `wrangler tail`, and I saw them filter events out.
+2. `docs/hero.png` is missing on purpose. The user takes the screenshot at the end.
+3. The `Shift-Cmd-D` key press. I ran each action with `rex do`, not with the key.
+4. A browser pane that takes clicks. rexweb warned `Rex isn't showing pane …` because my Rex window may be off screen. Navigation worked. I did not click or type in the preview.
+5. The auto-open log pane on a deployed Worker. I tested its two parts, `is_deployed` and the `--tail` pane, but not `up` end to end against a deployed Worker.
+6. `--remote`, and a project-local `node_modules/.bin/wrangler`.
+7. `rexdev dash` was checked up to the pane and URL. I did not check that the dashboard page loads, since rexweb has no Cloudflare sign-in.
 
-NOT READY FOR REVIEW yet. Items 1 and 2 need the orchestrator. The rest of the brief is done.
+READY FOR REVIEW
