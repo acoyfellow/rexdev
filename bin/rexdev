@@ -222,6 +222,7 @@ load_project() {
   key="$(basename "$proj")-$(printf '%s' "$proj" | shasum | cut -c1-8)"
   sd="$state_root/projects/$key"
   mkdir -p "$sd"
+  if [ -z "${REXDEV_ACT:-}" ]; then printf '%s' "$PATH" >"$state_root/path"; fi
   sess="${REX_SESSION:-$(cat "$sd/session" 2>/dev/null || true)}"
   rexs=()
   [ -n "$sess" ] && rexs=(-s "$sess")
@@ -719,7 +720,8 @@ case "$cmd" in
 
   _act)
     verb="$1" anchor="${2:-}" arg="${3:-}"
-    export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"
+    export REXDEV_ACT=1
+    export PATH="$(cat "$state_root/path" 2>/dev/null || true):$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"
     own="${REX_BLOCK:-}"
     dir=""
     if [ -n "$anchor" ]; then
