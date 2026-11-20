@@ -284,6 +284,17 @@ wrapper_pid() {
   [ -n "$p" ] && kill -0 "$p" 2>/dev/null && printf '%s\n' "$p" || true
 }
 
+save_env() {
+  local v
+  ( umask 077
+    : >"$sd/env"
+    for v in PATH NODE_EXTRA_CA_CERTS SSL_CERT_FILE SSL_CERT_DIR HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy \
+             CLOUDFLARE_API_TOKEN CLOUDFLARE_API_KEY CLOUDFLARE_EMAIL CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_ENV WRANGLER_LOG; do
+      [ -n "${!v+x}" ] && printf 'export %s=%q\n' "$v" "${!v}" >>"$sd/env"
+    done
+    exit 0 )
+}
+
 split_pane() {
   local label="$1" anchor="$2" dir="$3" ratio="$4" cwd="$5"; shift 5
   local opts res id
@@ -292,7 +303,8 @@ split_pane() {
   [ -n "$sess" ] && opts+=(-s "$sess")
   [ -n "$anchor" ] && opts+=(-b "$anchor")
   [ -n "${keep_open:-}" ] && opts+=(--keep-open)
-  res="$(rex split "${opts[@]}" -- "$@")" || die "Rex couldn't open a pane: $res"
+  save_env
+  res="$(rex split "${opts[@]}" -- "$self/rexdev" _env "$sd/env" "$@")" || die "Rex couldn't open a pane: $res"
   id="$(jq -r '.block_ids[0] // empty' <<<"$res" 2>/dev/null)"
   [ -n "$id" ] || die "Rex didn't open a pane: $res"
   printf '%s\n' "$id"
@@ -346,7 +358,7 @@ start_dev() {
 anchor_id() { printf '%s\n' "${REX_BLOCK:-}"; }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
-case "$cmd" in ""|-h|--help|help|-v|--version|version|doctor|skill) ;; *) command -v jq >/dev/null 2>&1 || die "rexdev needs jq. Run: brew install jq" ;; esac
+case "$cmd" in ""|-h|--help|help|-v|--version|version|doctor|skill|_env) ;; *) command -v jq >/dev/null 2>&1 || die "rexdev needs jq. Run: brew install jq" ;; esac
 
 parse_common() {
   cfg_arg="" env_arg="" extra=() rest=()
@@ -449,7 +461,7 @@ case "$cmd" in
         if [ "$id" != "${REX_BLOCK:-}" ]; then rex block close "${rexs[@]}" "$id" >/dev/null 2>&1 || true; fi
       fi
     done
-    rm -f "$sd/panes" "$sd/url" "$sd/restart" "$sd/wrapper.pid"
+    rm -f "$sd/panes" "$sd/url" "$sd/restart" "$sd/wrapper.pid" "$sd/env"
     note "Closed $closed panes for $(basename "$proj"). wrangler dev is stopped."
     ;;
 
@@ -689,6 +701,12 @@ case "$cmd" in
 
   -v|--version|version) echo "rexdev $VERSION" ;;
   help|-h|--help) if [ -n "${1:-}" ]; then help_cmd "$1"; else help_root; fi ;;
+
+  _env)
+    f="$1"; shift
+    [ -f "$f" ] && . "$f"
+    exec "$@"
+    ;;
 
   _dev)
     sd="$1" proj="$2"; shift 2
