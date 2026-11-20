@@ -1,0 +1,742 @@
+#!/bin/bash
+set -eo pipefail
+
+VERSION="0.1.0"
+self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)"
+root_repo="$(cd "$self/.." && pwd -P)"
+state_root="$HOME/.rexdev"
+json=0
+
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+need() { [ "$1" -ge 2 ] || die "$2 needs a value"; }
+
+help_root() {
+  cat <<'EOF'
+The Cloudflare Workers dev loop for Rex.
+One command lays out wrangler dev, a browser preview, and a log view
+beside your shell.
+
+Usage:
+  rexdev [command] [flags]
+
+Dev loop:
+  up          Open the dev server, preview, and log panes (the default)
+  down        Close the panes and stop wrangler dev
+  restart     Restart wrangler dev and reload the preview
+  open        Open or refocus the preview at a path
+  logs        Show a readable tail of the deployed Worker
+
+Cloudflare:
+  deploy      Run wrangler deploy in a pane, after you confirm
+  dash        Open the Worker's dashboard page in a browser pane
+
+Setup:
+  status      Show the project, the panes, and the dev URL
+  doctor      Check that rexdev can work
+  skill       Print the guide for coding agents
+
+Flags:
+  -h, --help      help for rexdev
+  -v, --version   print the version
+
+Run "rexdev COMMAND --help" for the flags of a command.
+EOF
+}
+
+help_cmd() {
+  case "$1" in
+    up) cat <<'EOF'
+Open the dev loop beside the current pane.
+
+rexdev finds wrangler.jsonc, wrangler.json, or wrangler.toml in this folder
+or a parent. It runs wrangler dev in a pane. When wrangler prints its ready
+line, rexdev opens the dev URL in a browser pane. A second run in the same
+project reuses the panes that are still open.
+
+The log pane runs "rexdev logs" and shows the deployed Worker. rexdev opens
+it only when the Worker is deployed, or with --tail. The dev output is
+already in the dev pane.
+
+Usage:
+  rexdev up [flags] [-- WRANGLER_DEV_FLAGS...]
+
+Examples:
+  rexdev
+  rexdev up --env staging
+  rexdev up --tail
+  rexdev up -- --port 9000 --remote
+
+Flags:
+      --config FILE      use this wrangler config file
+      --env ENV          pass --env ENV to wrangler
+      --tail             always open the log pane
+      --no-tail          never open the log pane
+      --no-open          don't open the browser pane
+      --split DIRECTION  place the dev pane right, left, above, or below (default right)
+      --json             print the result as JSON
+EOF
+    ;;
+    down) cat <<'EOF'
+Close the panes that rexdev opened for this project, and stop wrangler dev.
+
+Usage:
+  rexdev down [flags]
+
+Flags:
+      --config FILE   use this wrangler config file
+EOF
+    ;;
+    restart) cat <<'EOF'
+Restart wrangler dev in its pane, wait for the ready line, and reload the
+preview. With no dev pane, this does the same as "rexdev up".
+
+Usage:
+  rexdev restart [flags]
+
+Flags:
+      --config FILE   use this wrangler config file
+EOF
+    ;;
+    open) cat <<'EOF'
+Open the dev server in a browser pane at PATH. If the preview pane is open,
+rexdev goes to PATH in it and focuses it.
+
+Usage:
+  rexdev open [PATH] [flags]
+
+Examples:
+  rexdev open
+  rexdev open /admin
+
+Flags:
+      --config FILE      use this wrangler config file
+      --split DIRECTION  place a new pane right, left, above, or below (default right)
+      --json             print {block, url}
+EOF
+    ;;
+    logs) cat <<'EOF'
+Show a readable, colored tail of the deployed Worker. It reads
+"wrangler tail --format json" and prints one line for each request, with
+its method, path, status, and duration. console.log lines and exceptions
+appear under it.
+
+Usage:
+  rexdev logs [flags]
+
+Examples:
+  rexdev logs
+  rexdev logs --env staging --status error
+  rexdev logs --search checkout
+
+Flags:
+      --config FILE   use this wrangler config file
+      --env ENV       tail the Worker of this environment
+      --status S      show only ok, error, or canceled requests
+      --search TEXT   show only events with TEXT in their logs
+EOF
+    ;;
+    deploy) cat <<'EOF'
+Run wrangler deploy in a pane, after you confirm. The pane stays open when
+the deploy ends. rexdev exits with the status of wrangler.
+
+With no terminal, --yes is required.
+
+Usage:
+  rexdev deploy [flags] [-- WRANGLER_DEPLOY_FLAGS...]
+
+Examples:
+  rexdev deploy
+  rexdev deploy --yes
+  rexdev deploy --dry-run
+
+Flags:
+      --config FILE   use this wrangler config file
+      --env ENV       pass --env ENV to wrangler
+  -y, --yes           don't ask first
+      --dry-run       run wrangler deploy --dry-run, which uploads nothing
+EOF
+    ;;
+    dash) cat <<'EOF'
+Open the Worker's page in the Cloudflare dashboard, in a browser pane.
+
+rexdev takes the account ID from account_id in your wrangler config, then
+from CLOUDFLARE_ACCOUNT_ID, then from "wrangler whoami". If you can reach
+more than one account, set account_id in the config.
+
+Usage:
+  rexdev dash [flags]
+
+Flags:
+      --config FILE      use this wrangler config file
+      --env ENV          use the Worker of this environment
+      --split DIRECTION  place the pane right, left, above, or below (default right)
+      --json             print {block, url}
+EOF
+    ;;
+    status) cat <<'EOF'
+Show the project, its panes, the dev URL, and the wrangler version.
+
+Usage:
+  rexdev status [flags]
+
+Flags:
+      --config FILE   use this wrangler config file
+      --json          print the status as JSON
+EOF
+    ;;
+    doctor) printf 'Check Rex, rexweb, wrangler, jq, and node.\n\nUsage:\n  rexdev doctor [--json]\n' ;;
+    skill) printf 'Print the guide for coding agents.\n\nUsage:\n  rexdev skill\n' ;;
+    *) help_root ;;
+  esac
+}
+
+need_rex() { command -v rex >/dev/null 2>&1 || die "the rex command isn't on PATH. Run this from a Rex pane."; }
+need_rexweb() { command -v rexweb >/dev/null 2>&1 || die "this needs rexweb: https://github.com/acoyfellow/rexweb"; }
+need_node() { command -v node >/dev/null 2>&1 || die "rexdev needs node, which wrangler needs too."; }
+check_split() { case "$1" in right|left|above|below) ;; *) die "invalid --split \"$1\": use right, left, above, or below" ;; esac; }
+
+abspath() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$PWD" "$1" ;; esac; }
+
+find_config() {
+  local d="$PWD" f
+  while :; do
+    for f in wrangler.jsonc wrangler.json wrangler.toml; do
+      [ -f "$d/$f" ] && { printf '%s\n' "$d/$f"; return 0; }
+    done
+    [ "$d" = / ] && break
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+load_project() {
+  if [ -n "$cfg_arg" ]; then
+    config="$(abspath "$cfg_arg")"
+    [ -f "$config" ] || die "no config file at $cfg_arg"
+  else
+    config="$(find_config)" || die "no wrangler.jsonc, wrangler.json, or wrangler.toml in $PWD or a parent folder."
+  fi
+  config="$(cd "$(dirname "$config")" && pwd -P)/$(basename "$config")"
+  proj="$(dirname "$config")"
+  key="$(basename "$proj")-$(printf '%s' "$proj" | shasum | cut -c1-8)"
+  sd="$state_root/projects/$key"
+  mkdir -p "$sd"
+  sess="${REX_SESSION:-$(cat "$sd/session" 2>/dev/null || true)}"
+  rexs=()
+  [ -n "$sess" ] && rexs=(-s "$sess")
+  cfgargs=()
+  [ -n "$cfg_arg" ] && cfgargs=(--config "$config")
+  envargs=()
+  if [ -n "$env_arg" ]; then envargs=(--env "$env_arg"); fi
+}
+
+read_cfg() {
+  need_node
+  cfgjson="$(node "$root_repo/lib/cfg.js" "$config" "$env_arg")" || die "couldn't read $config"
+  worker="$(jq -r .name <<<"$cfgjson")"
+}
+
+wrangler_bin() {
+  if [ -x "$proj/node_modules/.bin/wrangler" ]; then printf '%s\n' "$proj/node_modules/.bin/wrangler"
+  elif command -v wrangler >/dev/null 2>&1; then command -v wrangler
+  else die "wrangler isn't installed. Run: npm install --save-dev wrangler"; fi
+}
+
+get_pane() { sed -n "s/^$1=//p" "$sd/panes" 2>/dev/null | head -1 || true; }
+set_pane() {
+  local tmp
+  tmp="$(mktemp)"
+  { grep -v "^$1=" "$sd/panes" 2>/dev/null || true; printf '%s=%s\n' "$1" "$2"; } >"$tmp"
+  mv "$tmp" "$sd/panes"
+}
+drop_pane() {
+  local tmp
+  [ -f "$sd/panes" ] || return 0
+  tmp="$(mktemp)"
+  grep -v "^$1=" "$sd/panes" >"$tmp" || true
+  mv "$tmp" "$sd/panes"
+}
+
+refresh_blocks() { blocks="$(rex block ls "${rexs[@]}" --json 2>/dev/null | jq -r '.blocks[].block_id' 2>/dev/null || true)"; }
+pane_alive() { [ -n "$1" ] && grep -qxF "$1" <<<"$blocks"; }
+
+strip_ansi() { sed $'s/\x1b\\[[0-9;?]*[a-zA-Z]//g' | tr -d '\r'; }
+
+ready_url() {
+  strip_ansi <"$sd/dev.log" 2>/dev/null | grep -oE 'Ready on https?://[^[:space:]]+' | tail -1 | sed 's/^Ready on //' || true
+}
+
+descendants() {
+  local p
+  for p in $(pgrep -P "$1" 2>/dev/null || true); do
+    printf '%s\n' "$p"
+    descendants "$p"
+  done
+}
+
+wrapper_pid() {
+  local p
+  p="$(cat "$sd/wrapper.pid" 2>/dev/null || true)"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && printf '%s\n' "$p" || true
+}
+
+split_pane() {
+  local label="$1" anchor="$2" dir="$3" ratio="$4" cwd="$5"; shift 5
+  local opts res id
+  need_rex
+  opts=(--shell=none --label "$label" --json --focus=false -c "$cwd" --split="$dir" --ratio "$ratio")
+  [ -n "$sess" ] && opts+=(-s "$sess")
+  [ -n "$anchor" ] && opts+=(-b "$anchor")
+  res="$(rex split "${opts[@]}" -- "$@")" || die "Rex couldn't open a pane: $res"
+  id="$(jq -r '.block_ids[0] // empty' <<<"$res" 2>/dev/null)"
+  [ -n "$id" ] || die "Rex didn't open a pane: $res"
+  printf '%s\n' "$id"
+}
+
+web_open() {
+  local url="$1" anchor="$2" dir="$3" ratio="$4" opts
+  need_rexweb
+  opts=(open "$url" --split="$dir" --ratio "$ratio" --focus=false)
+  [ -n "$anchor" ] && opts+=(-b "$anchor")
+  [ -n "$sess" ] && opts+=(-s "$sess")
+  rexweb "${opts[@]}"
+}
+
+wait_ready() {
+  local i dev
+  dev="$(get_pane dev)"
+  for i in $(seq 1 240); do
+    url="$(ready_url)"
+    [ -n "$url" ] && return 0
+    refresh_blocks
+    if ! pane_alive "$dev"; then die "the dev pane closed before wrangler was ready."; fi
+    sleep 0.25
+  done
+  die "wrangler dev didn't print its ready line in 60 seconds. Look at the dev pane."
+}
+
+is_deployed() {
+  local out
+  out="$("$(wrangler_bin)" deployments list --name "$worker" "${cfgargs[@]}" 2>/dev/null)" || return 1
+  grep -q 'Created:' <<<"$out"
+}
+
+dev_cmd() {
+  local wr
+  wr="$(wrangler_bin)"
+  devcmd=("$self/rexdev" _dev "$sd" "$proj" "$wr" dev "${cfgargs[@]}" "${envargs[@]}" "${extra[@]}")
+}
+
+start_dev() {
+  local anchor="$1" dir="$2" id
+  dev_cmd
+  : >"$sd/dev.log"
+  rm -f "$sd/url" "$sd/stop" "$sd/restart"
+  id="$(split_pane "rexdev:dev" "$anchor" "$dir" 60 "$proj" "${devcmd[@]}")"
+  set_pane dev "$id"
+  [ -n "${REX_SESSION:-}" ] && printf '%s\n' "$REX_SESSION" >"$sd/session"
+  printf '%s\n' "$proj" >"$state_root/last"
+}
+
+anchor_id() { printf '%s\n' "${REX_BLOCK:-}"; }
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in ""|-h|--help|help|-v|--version|version|doctor|skill) ;; *) command -v jq >/dev/null 2>&1 || die "rexdev needs jq. Run: brew install jq" ;; esac
+
+parse_common() {
+  cfg_arg="" env_arg="" extra=() rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --config) need $# "$1"; cfg_arg="$2"; shift 2 ;;
+      --config=*) cfg_arg="${1#*=}"; shift ;;
+      --env|-e) need $# "$1"; env_arg="$2"; shift 2 ;;
+      --env=*) env_arg="${1#*=}"; shift ;;
+      --json) json=1; shift ;;
+      --) shift; extra=("$@"); break ;;
+      *) rest+=("$1"); shift ;;
+    esac
+  done
+}
+
+case "$cmd" in
+  ""|up)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd up; exit 0 ;; esac; done
+    tail_mode=auto open=1 split=right
+    parse_common "$@"
+    set -- ${rest[@]+"${rest[@]}"}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --tail) tail_mode=yes; shift ;;
+        --no-tail) tail_mode=no; shift ;;
+        --no-open) open=0; shift ;;
+        --split) need $# "$1"; split="$2"; shift 2 ;;
+        --split=*) split="${1#*=}"; shift ;;
+        -*) die "unknown flag: $1" ;;
+        *) die "unexpected argument: $1" ;;
+      esac
+    done
+    check_split "$split"
+    need_rex
+    load_project; read_cfg
+    refresh_blocks
+    reused=0
+    dev="$(get_pane dev)"
+    if pane_alive "$dev" && [ -n "$(wrapper_pid)" ]; then
+      reused=1
+      note "The dev pane is already open. Reusing it."
+    else
+      start_dev "$(anchor_id)" "$split"
+      dev="$(get_pane dev)"
+    fi
+    url=""
+    wait_ready
+    refresh_blocks
+    web=""; weblabel=null
+    if [ "$open" = 1 ]; then
+      web="$(get_pane web)"
+      if pane_alive "$web"; then
+        rexweb nav "$url" -b "$web" >/dev/null 2>&1 || true
+      else
+        web="$(web_open "$url" "$dev" right 50)" || true
+        [ -n "$web" ] && set_pane web "$web"
+      fi
+    fi
+    logs=""
+    want_logs=0
+    case "$tail_mode" in
+      yes) want_logs=1 ;;
+      auto) if is_deployed; then want_logs=1; else note "The Worker \"$worker\" isn't deployed, so there is no log pane. Add --tail to open it."; fi ;;
+    esac
+    if [ "$want_logs" = 1 ]; then
+      logs="$(get_pane logs)"
+      if ! pane_alive "$logs"; then
+        logs="$(split_pane "rexdev:logs" "$dev" below 35 "$proj" "$self/rexdev" logs "${cfgargs[@]}" "${envargs[@]}")"
+        set_pane logs "$logs"
+      fi
+    fi
+    if [ "$json" = 1 ]; then
+      jq -nc --arg project "$proj" --arg worker "$worker" --arg dev "$dev" --arg url "$url" --arg web "$web" --arg logs "$logs" --argjson reused "$reused" \
+        '{project:$project, worker:$worker, dev:{pane:$dev, url:$url}, web:(if $web=="" then null else {pane:$web} end), logs:(if $logs=="" then null else {pane:$logs} end), reused:($reused==1)}'
+    else
+      note "Dev server at $url"
+      printf '%s\n' "$url"
+    fi
+    ;;
+
+  down)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd down; exit 0 ;; esac; done
+    parse_common "$@"
+    [ "${#rest[@]}" -eq 0 ] || die "unexpected argument: ${rest[0]}"
+    load_project
+    blocks=""
+    command -v rex >/dev/null 2>&1 && refresh_blocks
+    wp="$(wrapper_pid)"
+    touch "$sd/stop"
+    if [ -n "$wp" ]; then
+      for p in $(descendants "$wp"); do kill "$p" 2>/dev/null || true; done
+      kill "$wp" 2>/dev/null || true
+    fi
+    closed=0
+    for role in web logs dev deploy dash; do
+      id="$(get_pane "$role")"
+      if pane_alive "$id"; then
+        closed=$((closed + 1))
+        if [ "$id" != "${REX_BLOCK:-}" ]; then rex block close "${rexs[@]}" "$id" >/dev/null 2>&1 || true; fi
+      fi
+    done
+    rm -f "$sd/panes" "$sd/url" "$sd/restart" "$sd/wrapper.pid"
+    note "Closed $closed panes for $(basename "$proj"). wrangler dev is stopped."
+    ;;
+
+  restart)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd restart; exit 0 ;; esac; done
+    parse_common "$@"
+    [ "${#rest[@]}" -eq 0 ] || die "unexpected argument: ${rest[0]}"
+    need_rex
+    load_project; read_cfg
+    refresh_blocks
+    dev="$(get_pane dev)"; wp="$(wrapper_pid)"
+    if ! pane_alive "$dev" || [ -z "$wp" ]; then
+      note "No dev pane is open. Starting one."
+      exec "$self/rexdev" up "${cfgargs[@]}" "${envargs[@]}"
+    fi
+    rm -f "$sd/url"
+    touch "$sd/restart"
+    for p in $(descendants "$wp"); do kill "$p" 2>/dev/null || true; done
+    url=""
+    for i in $(seq 1 240); do
+      [ -f "$sd/url" ] && { url="$(cat "$sd/url")"; break; }
+      sleep 0.25
+    done
+    [ -n "$url" ] || die "wrangler dev didn't print its ready line in 60 seconds. Look at the dev pane."
+    web="$(get_pane web)"
+    if pane_alive "$web"; then
+      rexweb nav "$url" -b "$web" >/dev/null 2>&1 || rexweb reload -b "$web" >/dev/null 2>&1 || true
+    fi
+    note "Restarted. Dev server at $url"
+    printf '%s\n' "$url"
+    ;;
+
+  open|preview)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd open; exit 0 ;; esac; done
+    split=right path=/
+    parse_common "$@"
+    set -- ${rest[@]+"${rest[@]}"}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --split) need $# "$1"; split="$2"; shift 2 ;;
+        --split=*) split="${1#*=}"; shift ;;
+        -*) die "unknown flag: $1" ;;
+        *) path="$1"; shift ;;
+      esac
+    done
+    check_split "$split"
+    case "$path" in /*) ;; *) path="/$path" ;; esac
+    need_rex; need_rexweb
+    load_project
+    refresh_blocks
+    dev="$(get_pane dev)"
+    pane_alive "$dev" && [ -n "$(wrapper_pid)" ] || die "wrangler dev isn't running here. Run: rexdev up"
+    base="$(cat "$sd/url" 2>/dev/null || true)"
+    [ -n "$base" ] || base="$(ready_url)"
+    [ -n "$base" ] || die "wrangler dev isn't ready yet. Wait for its ready line, then run this again."
+    url="${base%/}$path"
+    web="$(get_pane web)"
+    if pane_alive "$web"; then
+      rexweb nav "$url" -b "$web" >/dev/null || die "the preview pane didn't load $url"
+      rexweb focus -b "$web" >/dev/null 2>&1 || true
+    else
+      web="$(web_open "$url" "$dev" "$split" 50)" || true
+      [ -n "$web" ] || die "rexweb didn't open a pane."
+      set_pane web "$web"
+      rexweb focus -b "$web" >/dev/null 2>&1 || true
+    fi
+    if [ "$json" = 1 ]; then jq -nc --arg block "$web" --arg url "$url" '{block:$block, url:$url}'; else printf '%s\n' "$web"; fi
+    ;;
+
+  logs|tail)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd logs; exit 0 ;; esac; done
+    status="" search=""
+    parse_common "$@"
+    set -- ${rest[@]+"${rest[@]}"}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) need $# "$1"; status="$2"; shift 2 ;;
+        --status=*) status="${1#*=}"; shift ;;
+        --search) need $# "$1"; search="$2"; shift 2 ;;
+        --search=*) search="${1#*=}"; shift ;;
+        -*) die "unknown flag: $1" ;;
+        *) die "unexpected argument: $1" ;;
+      esac
+    done
+    case "$status" in ""|ok|error|canceled) ;; *) die "invalid --status \"$status\": use ok, error, or canceled" ;; esac
+    load_project; read_cfg
+    wr="$(wrangler_bin)"
+    targs=(tail --format json "${cfgargs[@]}" "${envargs[@]}")
+    [ -n "$status" ] && targs+=(--status "$status")
+    [ -n "$search" ] && targs+=(--search "$search")
+    color=0
+    [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && color=1
+    cd "$proj"
+    note "Tailing $worker. Press Ctrl-C to stop."
+    "$wr" "${targs[@]}" | jq -R --unbuffered -r --argjson color "$color" -f "$root_repo/lib/format.jq"
+    ;;
+
+  deploy)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd deploy; exit 0 ;; esac; done
+    yes=0 dry=0
+    parse_common "$@"
+    set -- ${rest[@]+"${rest[@]}"}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -y|--yes) yes=1; shift ;;
+        --dry-run) dry=1; shift ;;
+        -*) die "unknown flag: $1" ;;
+        *) die "unexpected argument: $1" ;;
+      esac
+    done
+    need_rex
+    load_project; read_cfg
+    wr="$(wrangler_bin)"
+    dargs=(deploy "${cfgargs[@]}" "${envargs[@]}" ${extra[@]+"${extra[@]}"})
+    [ "$dry" = 1 ] && dargs+=(--dry-run)
+    if [ "$yes" = 0 ]; then
+      [ -t 0 ] || die "rexdev deploy publishes your Worker. Add --yes to confirm."
+      printf 'Deploy "%s"%s from %s? [y/N] ' "$worker" "${env_arg:+ (env $env_arg)}" "$proj" >&2
+      read -r a
+      case "$a" in [Yy]*) ;; *) exit 1 ;; esac
+    fi
+    refresh_blocks
+    old="$(get_pane deploy)"
+    if pane_alive "$old" && [ "$old" != "${REX_BLOCK:-}" ]; then rex block close "${rexs[@]}" "$old" >/dev/null 2>&1 || true; fi
+    opts=(--shell=none --label "rexdev:deploy" --json --focus=false --keep-open --wait -c "$proj" --split=below --ratio 40)
+    [ -n "$sess" ] && opts+=(-s "$sess")
+    [ -n "${REX_BLOCK:-}" ] && opts+=(-b "${REX_BLOCK}")
+    out="$(mktemp)"
+    set +e
+    rex split "${opts[@]}" -- "$wr" "${dargs[@]}" >"$out"
+    rc=$?
+    set -e
+    id="$(jq -r '.block_ids[0] // empty' <"$out" 2>/dev/null | head -1 || true)"
+    rm -f "$out"
+    [ -n "$id" ] && set_pane deploy "$id"
+    [ "$rc" = 0 ] && note "wrangler deploy finished." || note "wrangler deploy failed with status $rc."
+    [ "$json" = 1 ] && jq -nc --arg id "$id" --argjson status "$rc" --argjson dry "$dry" '{block:$id, status:$status, dry_run:($dry==1)}'
+    exit "$rc"
+    ;;
+
+  dash)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd dash; exit 0 ;; esac; done
+    split=right
+    parse_common "$@"
+    set -- ${rest[@]+"${rest[@]}"}
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --split) need $# "$1"; split="$2"; shift 2 ;;
+        --split=*) split="${1#*=}"; shift ;;
+        -*) die "unknown flag: $1" ;;
+        *) die "unexpected argument: $1" ;;
+      esac
+    done
+    check_split "$split"
+    need_rex; need_rexweb
+    load_project; read_cfg
+    [ -n "$worker" ] || die "$config has no \"name\"."
+    acct="$(jq -r .account_id <<<"$cfgjson")"
+    [ -n "$acct" ] || acct="${CLOUDFLARE_ACCOUNT_ID:-}"
+    if [ -z "$acct" ]; then
+      who="$("$(wrangler_bin)" whoami --json 2>/dev/null)" || die "no account ID. Set account_id in $(basename "$config"), or run: wrangler login"
+      n="$(jq -r '.accounts | length' <<<"$who")"
+      [ "$n" = 1 ] || die "you can reach $n accounts. Set account_id in $(basename "$config"), or set CLOUDFLARE_ACCOUNT_ID."
+      acct="$(jq -r '.accounts[0].id' <<<"$who")"
+    fi
+    url="https://dash.cloudflare.com/$acct/workers/services/view/$worker/production"
+    refresh_blocks
+    web="$(get_pane dash)"
+    if pane_alive "$web"; then
+      rexweb nav "$url" -b "$web" >/dev/null 2>&1 || true
+      rexweb focus -b "$web" >/dev/null 2>&1 || true
+    else
+      web="$(web_open "$url" "${REX_BLOCK:-}" "$split" 50)" || true
+      [ -n "$web" ] || die "rexweb didn't open a pane."
+      set_pane dash "$web"
+    fi
+    if [ "$json" = 1 ]; then jq -nc --arg block "$web" --arg url "$url" '{block:$block, url:$url}'; else printf '%s\n' "$web"; fi
+    ;;
+
+  status)
+    for a in "$@"; do case "$a" in -h|--help) help_cmd status; exit 0 ;; esac; done
+    parse_common "$@"
+    [ "${#rest[@]}" -eq 0 ] || die "unexpected argument: ${rest[0]}"
+    load_project; read_cfg
+    blocks=""
+    command -v rex >/dev/null 2>&1 && refresh_blocks
+    wv="$("$(wrangler_bin)" --version 2>/dev/null | tail -1 || true)"
+    wp="$(wrangler_bin 2>/dev/null || true)"
+    dev="$(get_pane dev)"; web="$(get_pane web)"; logs="$(get_pane logs)"
+    running=false
+    if pane_alive "$dev" && [ -n "$(wrapper_pid)" ]; then running=true; fi
+    url="$(cat "$sd/url" 2>/dev/null || true)"
+    [ "$running" = true ] || url=""
+    pane_json() { if pane_alive "$1"; then printf '%s' "$1"; fi; }
+    d="$(pane_json "$dev")"; w="$(pane_json "$web")"; l="$(pane_json "$logs")"
+    if [ "$json" = 1 ]; then
+      jq -nc --arg project "$proj" --arg config "$config" --arg worker "$worker" --arg env "$env_arg" --arg url "$url" --arg wv "$wv" --arg wp "$wp" \
+        --arg d "$d" --arg w "$w" --arg l "$l" --argjson running "$running" \
+        '{project:$project, config:$config, worker:$worker, env:(if $env=="" then null else $env end), wrangler:{version:$wv, path:$wp},
+          dev:{running:$running, pane:(if $d=="" then null else $d end), url:(if $url=="" then null else $url end)},
+          web:{pane:(if $w=="" then null else $w end)}, logs:{pane:(if $l=="" then null else $l end)}}'
+    else
+      printf 'project   %s\n' "$proj"
+      printf 'config    %s\n' "$(basename "$config")"
+      printf 'worker    %s%s\n' "$worker" "${env_arg:+ (env $env_arg)}"
+      printf 'wrangler  %s\n' "${wv:-not found}"
+      printf 'dev       %s\n' "$([ "$running" = true ] && echo "running in ${d} at ${url:-?}" || echo "not running")"
+      printf 'preview   %s\n' "${w:-none}"
+      printf 'logs      %s\n' "${l:-none}"
+    fi
+    ;;
+
+  doctor)
+    case "${1:-}" in -h|--help) help_cmd doctor; exit 0 ;; --json) json=1 ;; esac
+    if ! command -v jq >/dev/null 2>&1; then echo "FAIL  jq        rexdev needs jq. Run: brew install jq"; exit 1; fi
+    fails=0; rows=()
+    check() { rows+=("$(jq -nc --argjson ok "$1" --arg name "$2" --arg detail "$3" '{ok:$ok, name:$name, detail:$detail}')"); [ "$1" = true ] || fails=$((fails + 1)); }
+    check true jq "$(jq --version)"
+    if command -v node >/dev/null 2>&1; then check true node "$(node --version)"; else check false node "node isn't on PATH. wrangler needs it."; fi
+    if command -v rex >/dev/null 2>&1; then check true rex "$(rex version 2>/dev/null | head -1)"; else check false rex "the rex command isn't on PATH"; fi
+    if command -v rexweb >/dev/null 2>&1; then check true rexweb "$(rexweb --version 2>/dev/null || echo installed)"
+    else check false rexweb "not installed; the preview needs it: https://github.com/acoyfellow/rexweb"; fi
+    if command -v wrangler >/dev/null 2>&1; then check true wrangler "$(wrangler --version 2>/dev/null | tail -1) at $(command -v wrangler)"
+    else check true wrangler "not on PATH; rexdev uses node_modules/.bin/wrangler in a project, or run: npm install --save-dev wrangler"; fi
+    if cfgfile="$(find_config)"; then check true project "$cfgfile"; else check true project "no wrangler config in $PWD or a parent; run rexdev inside a Worker project"; fi
+    if [ -n "${REX_SESSION:-}" ]; then check true pane "running in a Rex pane"; else check true pane "not in a Rex pane; up, open, and deploy need one"; fi
+    init="${REX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua}"
+    if grep -Eqs "require[[:space:]]*\(?[\"']rexdev[\"']" "$init"; then check true lua "$init requires rexdev"
+    else check true lua "$init doesn't require rexdev; run ./install.sh to add the key bindings"; fi
+    if [ "$json" = 1 ]; then printf '%s\n' "${rows[@]}" | jq -sc '{ok:(map(.ok)|all), checks:.}'
+    else for r in "${rows[@]}"; do jq -r '"\(if .ok then "ok  " else "FAIL" end)  \(.name | . + "        " | .[0:8])  \(.detail)"' <<<"$r"; done; fi
+    [ "$fails" = 0 ]
+    ;;
+
+  skill) case "${1:-}" in -h|--help) help_cmd skill ;; *) cat "$root_repo/AGENTS.md" ;; esac ;;
+
+  -v|--version|version) echo "rexdev $VERSION" ;;
+  help|-h|--help) if [ -n "${1:-}" ]; then help_cmd "$1"; else help_root; fi ;;
+
+  _dev)
+    sd="$1" proj="$2"; shift 2
+    cd "$proj"
+    printf '%s\n' "$$" >"$sd/wrapper.pid"
+    trap 'rm -f "$sd/wrapper.pid"' EXIT
+    ttystate="$(stty -g 2>/dev/null || true)"
+    while :; do
+      rm -f "$sd/url"
+      : >"$sd/dev.log"
+      (
+        while :; do
+          u="$(sed $'s/\x1b\\[[0-9;?]*[a-zA-Z]//g' "$sd/dev.log" 2>/dev/null | tr -d '\r' | grep -oE 'Ready on https?://[^[:space:]]+' | tail -1 | sed 's/^Ready on //' || true)"
+          [ -n "$u" ] && { printf '%s\n' "$u" >"$sd/url"; break; }
+          sleep 0.3
+        done
+      ) &
+      watcher=$!
+      set +e
+      script -q -t 0 "$sd/dev.log" "$@"
+      rc=$?
+      set -e
+      if [ -n "$ttystate" ]; then stty "$ttystate" 2>/dev/null || true; fi
+      kill "$watcher" 2>/dev/null || true
+      [ -f "$sd/stop" ] && break
+      if [ -f "$sd/restart" ]; then rm -f "$sd/restart"; continue; fi
+      printf '\n\033[2m[wrangler exited with status %s]\033[0m\n' "$rc"
+      printf 'Press Return to start it again, or Ctrl-C to close this pane. '
+      read -r _ || break
+    done
+    ;;
+
+  _act)
+    verb="$1" anchor="${2:-}" arg="${3:-}"
+    export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin"
+    own="${REX_BLOCK:-}"
+    dir=""
+    if [ -n "$anchor" ]; then
+      dir="$(rex block call -b "$anchor" pwd 2>/dev/null | jq -r '.path // .cwd // .pwd // empty' 2>/dev/null || true)"
+    fi
+    [ -n "$dir" ] && [ -d "$dir" ] || dir="$(cat "$state_root/last" 2>/dev/null || true)"
+    [ -n "$dir" ] && [ -d "$dir" ] || { printf '\n  rexdev: no project. Run rexdev once in a Worker folder first.\n\n  Press Return to close.'; read -r _; exit 1; }
+    cd "$dir"
+    export REX_BLOCK="$anchor"
+    rc=0
+    case "$verb" in
+      open) "$self/rexdev" open ${arg:+"$arg"} >/dev/null || rc=$? ;;
+      deploy) "$self/rexdev" deploy || rc=$? ;;
+      *) "$self/rexdev" "$verb" >/dev/null || rc=$? ;;
+    esac
+    if [ "$rc" != 0 ]; then printf '\n  rexdev %s failed.\n\n  Press Return to close.' "$verb"; read -r _; fi
+    [ -n "$own" ] && rex block close "$own" >/dev/null 2>&1 || true
+    ;;
+
+  *) die "unknown command \"$cmd\". Run \"rexdev --help\"." ;;
+esac

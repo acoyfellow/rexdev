@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14">
+  <rect width="880" height="360" rx="14" fill="#fbfaf7"/>
+  <rect x="30" y="40" width="520" height="280" rx="12" fill="#ffffff" stroke="#d9d4c9"/>
+  <circle cx="52" cy="60" r="5" fill="#e2dfd8"/><circle cx="68" cy="60" r="5" fill="#e2dfd8"/><circle cx="84" cy="60" r="5" fill="#e2dfd8"/>
+  <text x="110" y="65" fill="#77736a" font-size="13">Rex window on your Mac</text>
+  <rect x="46" y="84" width="150" height="220" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="62" y="108" fill="#1d1b16" font-weight="600">your shell</text>
+  <text x="62" y="130" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">$ rexdev</text>
+  <rect x="206" y="84" width="170" height="116" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="222" y="108" fill="#1d1b16" font-weight="600">dev pane</text>
+  <text x="222" y="130" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">rexdev _dev</text>
+  <text x="222" y="150" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">wrangler dev</text>
+  <text x="222" y="170" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">Ready on :8787</text>
+  <rect x="206" y="210" width="170" height="94" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="222" y="234" fill="#1d1b16" font-weight="600">log pane</text>
+  <text x="222" y="256" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">rexdev logs</text>
+  <text x="222" y="276" fill="#77736a" font-size="12">deployed Worker</text>
+  <rect x="386" y="84" width="150" height="220" rx="8" fill="#ffffff" stroke="#e2553a" stroke-width="2"/>
+  <text x="402" y="108" fill="#e2553a" font-weight="600">rexweb pane</text>
+  <text x="402" y="128" fill="#77736a" font-size="12">the dev URL</text>
+  <rect x="402" y="152" width="118" height="10" rx="5" fill="#f1ede6"/>
+  <rect x="402" y="170" width="90" height="10" rx="5" fill="#f1ede6"/>
+  <text x="402" y="284" fill="#77736a" font-family="ui-monospace, Menlo, monospace" font-size="12">localhost:8787</text>
+  <rect x="610" y="40" width="240" height="280" rx="12" fill="#ffffff" stroke="#d9d4c9"/>
+  <text x="630" y="68" fill="#1d1b16" font-weight="600">~/.rexdev/projects/NAME</text>
+  <rect x="626" y="84" width="208" height="44" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="642" y="111" fill="#1d1b16" font-size="13">dev.log, the recorded output</text>
+  <rect x="626" y="138" width="208" height="44" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="642" y="165" fill="#1d1b16" font-size="13">url, from the ready line</text>
+  <rect x="626" y="192" width="208" height="44" rx="8" fill="#f4f2ed" stroke="#e2dfd8"/>
+  <text x="642" y="219" fill="#1d1b16" font-size="13">panes, the IDs rexdev opened</text>
+  <text x="630" y="270" fill="#77736a" font-size="12">A second rexdev up checks</text>
+  <text x="630" y="288" fill="#77736a" font-size="12">these panes and reuses them.</text>
+  <path d="M376 140 H610" stroke="#e2553a" stroke-width="2" fill="none" stroke-dasharray="5 4"/>
+</svg>
