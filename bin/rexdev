@@ -467,7 +467,8 @@ case "$cmd" in
     fi
     rm -f "$sd/url"
     touch "$sd/restart"
-    for p in $(descendants "$wp"); do kill "$p" 2>/dev/null || true; done
+    kids=" $(pgrep -P "$wp" | tr '\n' ' ') "
+    for p in $(descendants "$wp"); do case "$kids" in *" $p "*) ;; *) kill "$p" 2>/dev/null || true ;; esac; done
     url=""
     for i in $(seq 1 240); do
       [ -f "$sd/url" ] && { url="$(cat "$sd/url")"; break; }
@@ -476,7 +477,7 @@ case "$cmd" in
     [ -n "$url" ] || die "wrangler dev didn't print its ready line in 60 seconds. Look at the dev pane."
     web="$(get_pane web)"
     if pane_alive "$web"; then
-      rexweb nav "$url" -b "$web" >/dev/null 2>&1 || rexweb reload -b "$web" >/dev/null 2>&1 || true
+      rexweb reload -b "$web" >/dev/null 2>&1 || rexweb nav "$url" -b "$web" >/dev/null 2>&1 || true
     fi
     note "Restarted. Dev server at $url"
     printf '%s\n' "$url"
@@ -652,7 +653,7 @@ case "$cmd" in
           dev:{running:$running, pane:(if $d=="" then null else $d end), url:(if $url=="" then null else $url end)},
           web:{pane:(if $w=="" then null else $w end)}, logs:{pane:(if $l=="" then null else $l end)}}'
     else
-      printf 'project   %s\n' "$proj"
+      printf 'project   %s\n' "${proj/#$HOME/~}"
       printf 'config    %s\n' "$(basename "$config")"
       printf 'worker    %s%s\n' "$worker" "${env_arg:+ (env $env_arg)}"
       printf 'wrangler  %s\n' "${wv:-not found}"
