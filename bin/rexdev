@@ -223,6 +223,7 @@ load_project() {
   key="$(basename "$proj")-$(printf '%s' "$proj" | shasum | cut -c1-8)"
   sd="$state_root/projects/$key"
   mkdir -p "$sd"
+  chmod 700 "$state_root"
   if [ -z "${REXDEV_ACT:-}" ]; then printf '%s' "$PATH" >"$state_root/path"; fi
   sess="${REX_SESSION:-$(cat "$sd/session" 2>/dev/null || true)}"
   rexs=()
