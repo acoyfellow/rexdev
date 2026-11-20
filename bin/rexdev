@@ -288,6 +288,7 @@ split_pane() {
   opts=(--shell=none --label "$label" --json --focus=false -c "$cwd" --split="$dir" --ratio "$ratio")
   [ -n "$sess" ] && opts+=(-s "$sess")
   [ -n "$anchor" ] && opts+=(-b "$anchor")
+  [ -n "${keep_open:-}" ] && opts+=(--keep-open)
   res="$(rex split "${opts[@]}" -- "$@")" || die "Rex couldn't open a pane: $res"
   id="$(jq -r '.block_ids[0] // empty' <<<"$res" 2>/dev/null)"
   [ -n "$id" ] || die "Rex didn't open a pane: $res"
@@ -411,7 +412,7 @@ case "$cmd" in
     if [ "$want_logs" = 1 ]; then
       logs="$(get_pane logs)"
       if ! pane_alive "$logs"; then
-        logs="$(split_pane "rexdev:logs" "$dev" below 35 "$proj" "$self/rexdev" logs "${cfgargs[@]}" "${envargs[@]}")"
+        logs="$(keep_open=1 split_pane "rexdev:logs" "$dev" below 35 "$proj" "$self/rexdev" logs "${cfgargs[@]}" "${envargs[@]}")"
         set_pane logs "$logs"
       fi
     fi
@@ -674,7 +675,7 @@ case "$cmd" in
     if [ -n "${REX_SESSION:-}" ]; then check true pane "running in a Rex pane"; else check true pane "not in a Rex pane; up, open, and deploy need one"; fi
     init="${REX_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/rex/init.lua}"
     if grep -Eqs "require[[:space:]]*\(?[\"']rexdev[\"']" "$init"; then check true lua "$init requires rexdev"
-    else check true lua "$init doesn't require rexdev; run ./install.sh to add the key bindings"; fi
+    else check true lua "$init doesn't require rexdev yet; run ./install.sh for the key bindings"; fi
     if [ "$json" = 1 ]; then printf '%s\n' "${rows[@]}" | jq -sc '{ok:(map(.ok)|all), checks:.}'
     else for r in "${rows[@]}"; do jq -r '"\(if .ok then "ok  " else "FAIL" end)  \(.name | . + "        " | .[0:8])  \(.detail)"' <<<"$r"; done; fi
     [ "$fails" = 0 ]
