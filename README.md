@@ -7,6 +7,8 @@ sit beside your shell.
 
 <img src="docs/hero.png" alt="A Rex window with three panes. Left, a shell. Middle, wrangler dev prints its ready line at localhost 8787. Right, a browser pane shows the Worker's Hello World page.">
 
+[Watch the demo](docs/demo.mp4) (32 seconds). An agent edits a Worker, runs `rexdev restart`, and checks the preview, while the log pane tails the deployed Worker.
+
 ```sh
 rexdev                  # wrangler dev, a preview, and logs, beside you
 rexdev restart          # restart wrangler dev and reload the preview
